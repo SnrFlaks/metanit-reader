@@ -26,39 +26,54 @@ namespace MetanitReader {
                 var htmlDocument = new HtmlDocument();
                 htmlDocument.LoadHtml(page);
                 var sections = htmlDocument.DocumentNode.SelectNodes("//div[@class='navmenu']/a");
-                if (sections != null && sections.Count > 0) {
-                    var sectionInfo = GetInfoFromCollection(sections);
-                    var section = AnsiConsole.Prompt(
-                        new SelectionPrompt<string>()
-                            .Title("Which [bold blue]section[/] do you want to open?")
-                            .AddChoices(sectionInfo.Keys)
-                        );
-                    string sectionUrl = sectionInfo[section];
-                    if (section != "C#") {
-                        page = await httpClient.GetStringAsync("https:" + sectionUrl);
-                        htmlDocument.LoadHtml(page);
-                        var guides = htmlDocument.DocumentNode.SelectNodes("//div[@class='navmenu']/a");
-                        var guideInfo = GetInfoFromCollection(guides);
-                        var guide = AnsiConsole.Prompt(
-                            new SelectionPrompt<string>()
-                                .Title("Which [bold blue]guide[/] do you want to open?")
-                                .AddChoices(guideInfo.Keys)
-                            );
-                        string guideUrl = guideInfo[guide];
-                        AnsiConsole.Markup($"[bold green]You selected: {section} | {guide}[/]\n");
-                        AnsiConsole.Markup($"URL: {guideUrl}\n");
-                    }
-                    else {
-
-                    }
+                (var section, var sectionUrl) = SelectCollectionElement("section", sections);
+                page = await httpClient.GetStringAsync($"https:{sectionUrl}");
+                htmlDocument.LoadHtml(page);
+                if (section != "C#") {
+                    var guides = htmlDocument.DocumentNode.SelectNodes("//div[@class='navmenu']/a");
+                    (var guide, var guideUrl) = SelectCollectionElement("guide", guides);
+                    AnsiConsole.Markup($"[bold green]You selected: {section} | {guide}[/]\n");
+                    AnsiConsole.Markup($"URL: https:{sectionUrl}{guideUrl}\n");
                 }
                 else {
-                    Console.WriteLine("No list items found.");
+                    var content = htmlDocument.DocumentNode.SelectSingleNode("//div[@class='centerRight']");
+                    var subsections = content.SelectNodes(".//h3");
+                    var subsectionChoices = subsections.Select(h => h.InnerText.Trim());
+                    var subsection = AnsiConsole.Prompt(
+                        new SelectionPrompt<string>()
+                            .Title("Which [bold blue]subsection[/] do you want to open?")
+                            .AddChoices(subsectionChoices)
+                    );
+                    var subsectionNode = subsections.FirstOrDefault(h => h.InnerText.Trim() == subsection);
+                    if (subsectionNode != null) {
+                        var guidesContainer = HtmlNode.CreateNode("<div></div>"); ;
+                        var node = subsectionNode.NextSibling;
+                        while (node != null && node.Name != "h3") {
+                            if (node.Name == "p") {
+                                guidesContainer.AppendChild(node.SelectSingleNode(".//a"));
+                            }
+                            node = node.NextSibling;
+                        }
+                        var guides = guidesContainer.ChildNodes;
+                        (var guide, var guideUrl) = SelectCollectionElement("guide", guides);
+                        AnsiConsole.Markup($"[bold green]You selected: {section} | {subsection} | {guide}[/]\n");
+                        AnsiConsole.Markup($"URL: https:{sectionUrl}{guideUrl}\n");
+                    }
                 }
             }
             catch (HttpRequestException e) {
                 AnsiConsole.Markup($"[bold red]Error: \t{e.Message}[/]\n\n");
             }
+        }
+
+        static (string, string) SelectCollectionElement(string type, HtmlNodeCollection collection) {
+            var collectionInfo = GetInfoFromCollection(collection);
+            var element = AnsiConsole.Prompt(
+                new SelectionPrompt<string>()
+                    .Title($"Which [bold blue]{type}[/] do you want to open?")
+                    .AddChoices(collectionInfo.Keys)
+                );
+            return (element, collectionInfo[element]);
         }
 
         static Dictionary<string, string> GetInfoFromCollection(HtmlNodeCollection collection) {
