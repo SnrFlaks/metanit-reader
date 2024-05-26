@@ -5,7 +5,7 @@ namespace MetanitReader {
     public class GuideSelection {
         const string url = "https://metanit.com/";
 
-        public static async Task<Guide?> SelectGuide(HttpClient httpClient) {
+        public static async Task<Guide?> SelectGuideAsync(HttpClient httpClient) {
             try {
                 string page = await httpClient.GetStringAsync(url);
                 HtmlDocument htmlDocument = new();
@@ -16,18 +16,12 @@ namespace MetanitReader {
                 htmlDocument.LoadHtml(page);
                 if (section == "MongoDB" || section == "Swift") {
                     string name = htmlDocument.DocumentNode.SelectSingleNode("//h1").InnerText;
-                    return new Guide(name, sectionUrl);
+                    return new Guide(name, $"https:{sectionUrl}");
                 }
                 else if (section == "C#") {
-                    HtmlNode content = htmlDocument.DocumentNode.SelectSingleNode("//div[@class='centerRight']");
-                    HtmlNodeCollection subsections = content.SelectNodes(".//h3");
-                    var subsectionChoices = subsections.Select(h => h.InnerText.Trim());
-                    var subsection = AnsiConsole.Prompt(
-                        new SelectionPrompt<string>()
-                            .Title("Which [bold blue]subsection[/] do you want to open?")
-                            .AddChoices(subsectionChoices)
-                    );
-                    HtmlNode? subsectionNode = subsections.FirstOrDefault(h => h.InnerText.Trim() == subsection);
+                    HtmlNodeCollection subsections = htmlDocument.DocumentNode.SelectNodes("//div[@class='centerRight']/h3");
+                    (string subsection, string subsectionUrl) = SelectCollectionElement("subsection", subsections);
+                    HtmlNode? subsectionNode = subsections.SingleOrDefault(h => h.InnerText.Trim() == subsection);
                     if (subsectionNode != null) {
                         HtmlNode guidesContainer = HtmlNode.CreateNode("<div></div>"); ;
                         HtmlNode node = subsectionNode.NextSibling;
@@ -45,7 +39,7 @@ namespace MetanitReader {
                 else {
                     HtmlNodeCollection guides = htmlDocument.DocumentNode.SelectNodes("//div[@class='navmenu']/a");
                     (string guide, string guideUrl) = SelectCollectionElement("guide", guides);
-                    return new Guide(guide, $"https:{sectionUrl}{guideUrl}");
+                    return new Guide(guide, $"https:{guideUrl}");
                 }
             }
             catch (HttpRequestException e) {
@@ -62,12 +56,13 @@ namespace MetanitReader {
             var element = AnsiConsole.Prompt(
                 new SelectionPrompt<string>()
                     .Title($"Which [bold blue]{type}[/] do you want to open?")
+                    .MoreChoicesText($"[grey](Move up and down to reveal more {type}s)[/]")
                     .AddChoices(collectionInfo.Keys)
                 );
             return (element, collectionInfo[element]);
         }
 
-        static Dictionary<string, string> GetInfoFromCollection(HtmlNodeCollection collection) {
+        public static Dictionary<string, string> GetInfoFromCollection(HtmlNodeCollection collection) {
             Dictionary<string, string> info = [];
             foreach (var c in collection) {
                 string name = c.InnerText.Trim();
