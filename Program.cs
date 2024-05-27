@@ -11,18 +11,24 @@ AnsiConsole.Markup($"[bold]Original Website:[/] [link]{url}[/]\n\n");
 HttpClient httpClient = ProxyManager.Instance.CreateHttpClientWithProxy();
 httpClient.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3");
 
-Guide? guide = await GuideSelection.SelectGuideAsync(httpClient);
-if (guide != null) {
-    AnsiConsole.Markup($"[bold]You selected: [green]{guide.Name}[/][/]\n");
-    AnsiConsole.Markup($"[bold]URL:[/] {guide.Url}\n\n");
-    if (AnsiConsole.Confirm("Do you want to download the guide as a book?")) {
+// while (true) {
+//     if (!AnsiConsole.Confirm("Would you like to select a content for download?")) {
+//         break;
+//     }
+
+Content? content = await Selection.SelectContentAsync(httpClient);
+if (content != null) {
+    AnsiConsole.Markup($"[bold]You selected: [green]{content.Name}[/][/]\n");
+    AnsiConsole.Markup($"[bold]URL:[/] {content.Url}\n\n");
+    if (AnsiConsole.Confirm("Do you want to download the content as a book?")) {
         var format = AnsiConsole.Prompt(
            new SelectionPrompt<string>()
                .Title("")
                .AddChoices(["PDF", "FB2", "EPUB"]));
-        await GuideDownloader.DownloadGuideAsync(guide, format, httpClient);
+        await Downloader.DownloadContentAsync(content, format.ToLower(), httpClient);
     }
 }
 else {
-    AnsiConsole.Markup("[bold red]Error occurred while selecting the guide.[/]");
+    AnsiConsole.Markup("[bold red]Error occurred while selecting the content.[/]");
 }
+// }

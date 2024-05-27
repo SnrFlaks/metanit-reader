@@ -2,10 +2,10 @@ using HtmlAgilityPack;
 using Spectre.Console;
 
 namespace MetanitReader {
-    public class GuideSelection {
+    public class Selection {
         const string url = "https://metanit.com/";
 
-        public static async Task<Guide?> SelectGuideAsync(HttpClient httpClient) {
+        public static async Task<Content?> SelectContentAsync(HttpClient httpClient) {
             try {
                 string page = await httpClient.GetStringAsync(url);
                 HtmlDocument htmlDocument = new();
@@ -16,7 +16,7 @@ namespace MetanitReader {
                 htmlDocument.LoadHtml(page);
                 if (section == "MongoDB" || section == "Swift") {
                     string name = htmlDocument.DocumentNode.SelectSingleNode("//h1").InnerText;
-                    return new Guide(name, $"https:{sectionUrl}");
+                    return new Content(name, $"https:{sectionUrl}", ContentType.Guide);
                 }
                 else if (section == "C#") {
                     HtmlNodeCollection subsections = htmlDocument.DocumentNode.SelectNodes("//div[@class='centerRight']/h3");
@@ -33,13 +33,20 @@ namespace MetanitReader {
                         }
                         HtmlNodeCollection guides = guidesContainer.ChildNodes;
                         (string guide, string guideUrl) = SelectCollectionElement("guide", guides);
-                        return new Guide(guide, $"https:{sectionUrl}{guideUrl}");
+                        return new Content(guide, $"https:{sectionUrl}{guideUrl}", ContentType.Guide);
                     }
                 }
                 else {
                     HtmlNodeCollection guides = htmlDocument.DocumentNode.SelectNodes("//div[@class='navmenu']/a");
                     (string guide, string guideUrl) = SelectCollectionElement("guide", guides);
-                    return new Guide(guide, $"https:{guideUrl}");
+                    if (guide == "Ассемблер. Статьи.") {
+                        page = await httpClient.GetStringAsync($"https:{guideUrl}");
+                        htmlDocument.LoadHtml(page);
+                        HtmlNodeCollection articles = htmlDocument.DocumentNode.SelectNodes(".//ul[@class='contpage']/li/p/a");
+                        (string article, string articleUrl) = SelectCollectionElement("articles", articles);
+                        return new Content(article, $"https:{guideUrl}{articleUrl}", ContentType.Article);
+                    }
+                    return new Content(guide, $"https:{guideUrl}", ContentType.Guide);
                 }
             }
             catch (HttpRequestException e) {
