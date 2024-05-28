@@ -20,7 +20,7 @@ namespace MetanitReader {
                 }
                 else if (section == "C#") {
                     HtmlNodeCollection subsections = htmlDocument.DocumentNode.SelectNodes("//div[@class='centerRight']/h3");
-                    (string subsection, string subsectionUrl) = SelectCollectionElement("subsection", subsections);
+                    (string subsection, _) = SelectCollectionElement("subsection", subsections);
                     HtmlNode? subsectionNode = subsections.SingleOrDefault(h => h.InnerText.Trim() == subsection);
                     if (subsectionNode != null) {
                         HtmlNode guidesContainer = HtmlNode.CreateNode("<div></div>"); ;
@@ -73,8 +73,11 @@ namespace MetanitReader {
             Dictionary<string, string> info = [];
             foreach (var c in collection) {
                 string name = c.InnerText.Trim();
-                string url = c.GetAttributeValue("href", "").Trim();
-                info.Add(name, url);
+                HtmlAttribute hrefAttribute = c.Attributes["href"];
+                string url = hrefAttribute != null ? hrefAttribute.Value : string.Empty;
+                if (!string.IsNullOrEmpty(name) && !info.ContainsKey(name)) {
+                    info.Add(name, url);
+                }
             }
             return info;
         }

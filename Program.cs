@@ -1,5 +1,4 @@
-﻿using HtmlAgilityPack;
-using MetanitReader;
+﻿using MetanitReader;
 using Spectre.Console;
 
 const string url = "https://metanit.com/";

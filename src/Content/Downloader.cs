@@ -6,61 +6,65 @@ namespace MetanitReader {
         private static readonly string booksDirPath = GetBooksDir();
 
         public static async Task DownloadContentAsync(Content content, string format, HttpClient httpClient) {
-            if (content.Type == ContentType.Article) {
-                await AnsiConsole.Progress()
-                    .StartAsync(async ctx => {
-                        var task = ctx.AddTask($"[bold green]{content.Name}[/]\n\n");
-                        await DownloadPageAsync(content.Url, format, httpClient);
-                        task.Increment(100);
-                    });
-                return;
-            }
-            string page = await httpClient.GetStringAsync(content.Url);
-            HtmlDocument htmlDocument = new();
-            htmlDocument.LoadHtml(page);
-            HtmlNodeCollection chapters = htmlDocument.DocumentNode.SelectNodes("//ul[@class='filetree']/li");
-            foreach (var chapter in chapters) {
-                string chapterName = chapter.SelectSingleNode(".//span").InnerText;
-                if (chapter.ChildNodes.Count > 1) {
-                    await AnsiConsole.Progress()
-                        .StartAsync(async ctx => {
-                            var task = ctx.AddTask($"[bold green]{chapterName}[/]\n\n");
-                            AnsiConsole.Cursor.MoveUp(1);
-                            HtmlNodeCollection subchapters = chapter.SelectNodes(".//ul/li/span/a");
-                            double increment = 100 / subchapters.Count;
-                            foreach (var s in subchapters) {
-                                string subchapterUrl = $"https:{s.GetAttributeValue("href", "").Trim()}";
-                                await DownloadPageAsync(subchapterUrl, format, httpClient);
-                                task.Increment(increment);
+            List<HtmlNode> contentList = [];
+            await AnsiConsole.Status()
+                .StartAsync("Download chapters...", async ctx => {
+                    ctx.Spinner(Spinner.Known.Dots);
+                    ctx.SpinnerStyle(Style.Parse("green"));
+                    if (content.Type == ContentType.Article) {
+                        AnsiConsole.MarkupLine($"[bold green]{content.Name}[/]");
+                        HtmlNode pageContent = await GetPageContentAsync(content.Url, httpClient);
+                        contentList.Add(pageContent);
+                    }
+                    else {
+                        string page = await httpClient.GetStringAsync(content.Url);
+                        HtmlDocument htmlDocument = new();
+                        htmlDocument.LoadHtml(page);
+                        HtmlNodeCollection chapters = htmlDocument.DocumentNode.SelectNodes("//ul[@class='filetree']/li");
+                        foreach (var chapter in chapters) {
+                            string chapterName = chapter.SelectSingleNode(".//span").InnerText;
+                            if (chapter.ChildNodes.Count > 1) {
+                                AnsiConsole.MarkupLine($"[bold green]{chapterName}[/]");
+                                HtmlNodeCollection subchapters = chapter.SelectNodes(".//ul/li/span/a");
+                                double increment = 100 / subchapters.Count;
+                                foreach (var s in subchapters) {
+                                    string subchapterUrl = $"https:{s.Attributes["href"].Value}";
+                                    HtmlNode pageContent = await GetPageContentAsync(subchapterUrl, httpClient);
+                                    contentList.Add(pageContent);
+                                }
                             }
-                            task.Value = 100;
-                        });
-                }
-                else {
-                    HtmlNode subchapter = chapter.SelectSingleNode(".//span/a");
-                    await AnsiConsole.Progress()
-                        .StartAsync(async ctx => {
-                            var task = ctx.AddTask($"[bold green]{subchapter.InnerText}[/]\n\n");
-                            AnsiConsole.Cursor.MoveUp(1);
-                            string subchapterUrl = $"https:{subchapter.GetAttributeValue("href", "").Trim()}";
-                            await DownloadPageAsync(subchapterUrl, format, httpClient);
-                            task.Increment(100);
-                        });
-                }
-            }
+                            else {
+                                HtmlNode subchapter = chapter.SelectSingleNode(".//span/a");
+                                AnsiConsole.MarkupLine($"[bold green]{chapterName}[/]");
+                                string subchapterUrl = $"https:{subchapter.Attributes["href"].Value}";
+                                HtmlNode pageContent = await GetPageContentAsync(subchapterUrl, httpClient);
+                                contentList.Add(pageContent);
+                            }
+                        }
+                    }
+                });
+            await (format switch {
+                "pdf" => DownloadPdf(contentList, booksDirPath),
+                "fb2" => DownloadFb2(contentList, booksDirPath),
+                "epub" => DownloadEpub(contentList, booksDirPath),
+                _ => throw new ArgumentException($"Unsupported format: {format}", nameof(format)),
+            });
         }
 
-        private static async Task DownloadPageAsync(string url, string format, HttpClient httpClient) {
+        private static async Task<HtmlNode> GetPageContentAsync(string title, string url, HttpClient httpClient) {
             string page = await httpClient.GetStringAsync(url);
             HtmlDocument htmlDocument = new();
             htmlDocument.LoadHtml(page);
             HtmlNode content = htmlDocument.DocumentNode.SelectSingleNode("//div[@class='item center menC']");
-            await (format switch {
-                "pdf" => DownloadPdf(content, booksDirPath),
-                "fb2" => DownloadFb2(content, booksDirPath),
-                "epub" => DownloadEpub(content, booksDirPath),
-                _ => throw new ArgumentException($"Unsupported format: {format}", nameof(format)),
-            });
+            return content;
+        }
+
+        private static async Task<HtmlNode> GetPageContentAsync(string url, HttpClient httpClient) {
+            string page = await httpClient.GetStringAsync(url);
+            HtmlDocument htmlDocument = new();
+            htmlDocument.LoadHtml(page);
+            HtmlNode content = htmlDocument.DocumentNode.SelectSingleNode("//div[@class='item center menC']");
+            return content;
         }
 
         private static string GetBooksDir() {
@@ -72,15 +76,15 @@ namespace MetanitReader {
             return booksDirPath;
         }
 
-        private static async Task DownloadPdf(HtmlNode content, string booksDirPath) {
+        private static async Task DownloadPdf(List<HtmlNode> contentList, string booksDirPath) {
 
         }
 
-        private static async Task DownloadFb2(HtmlNode content, string booksDirPath) {
+        private static async Task DownloadFb2(List<HtmlNode> contentList, string booksDirPath) {
 
         }
 
-        private static async Task DownloadEpub(HtmlNode content, string booksDirPath) {
+        private static async Task DownloadEpub(List<HtmlNode> contentList, string booksDirPath) {
 
         }
     }
