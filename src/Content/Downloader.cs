@@ -45,20 +45,25 @@ namespace MetanitReader {
                         }
                     }
                 });
+            // await AnsiConsole.Status()
+            //     .StartAsync("Preparing your fb2 book...", async ctx => {
+            //         ctx.Spinner(Spinner.Known.Dots);
+            //         ctx.SpinnerStyle(Style.Parse("green"));
             await (format switch {
                 "fb2" => DownloadFb2(content, contentList, booksDirPath),
                 "epub" => DownloadEpub(contentList, booksDirPath),
                 _ => throw new ArgumentException($"Unsupported format: {format}", nameof(format)),
             });
+            // });
         }
 
         private static async Task<HtmlNode> GetPageContentAsync(string url, HttpClient httpClient) {
             var page = await httpClient.GetStringAsync(url).ConfigureAwait(false);
             var htmlDocument = new HtmlDocument();
             htmlDocument.LoadHtml(page);
-            var socBlocks = htmlDocument.DocumentNode.SelectNodes("//div[contains(@class, 'socBlock')]");
-            if (socBlocks != null) {
-                foreach (var node in socBlocks) {
+            var nodesToRemove = htmlDocument.DocumentNode.SelectNodes("//div[contains(@class, 'socBlock') or contains(@class, 'nav')]");
+            if (nodesToRemove != null) {
+                foreach (var node in nodesToRemove) {
                     node.Remove();
                 }
             }

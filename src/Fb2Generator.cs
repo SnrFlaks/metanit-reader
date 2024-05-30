@@ -1,9 +1,10 @@
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Xml;
 using HtmlAgilityPack;
 
 namespace MetanitReader {
-    class Fb2Generator {
+    partial class Fb2Generator {
         public static async Task<XmlDocument> GenerateFb2(Content content, List<Content> contentList) {
             XmlDocument doc = new();
             XmlDeclaration xmlDeclaration = doc.CreateXmlDeclaration("1.0", "utf-8", null);
@@ -16,13 +17,13 @@ namespace MetanitReader {
             description.AppendChild(titleInfo);
             if (content.Name != null) {
                 XmlElement bookTitle = doc.CreateElement("book-title");
-                bookTitle.InnerText = content.Name;
+                bookTitle.InnerXml = content.Name;
                 titleInfo.AppendChild(bookTitle);
             }
             XmlElement author = doc.CreateElement("author");
             titleInfo.AppendChild(author);
             XmlElement firstName = doc.CreateElement("first-name");
-            firstName.InnerText = "METANIT";
+            firstName.InnerXml = "METANIT";
             author.AppendChild(firstName);
             XmlElement body = doc.CreateElement("body");
             fB.AppendChild(body);
@@ -38,7 +39,7 @@ namespace MetanitReader {
             }
             HtmlNode node = content.Node;
             if (node.Name == "h1" || node.Name == "h2" || node.Name == "h3") {
-                AddTitle(node, body, doc);
+                AddTitle(node, body, doc, node.Name);
             }
             else if (node.Name == "p") {
                 AddParagraph(node, body, doc);
@@ -47,7 +48,7 @@ namespace MetanitReader {
                 AddList(node, body, doc);
             }
             else if (node.Name == "pre") {
-                AddCode(node, body, doc);
+                AddCode(content, node, body, doc);
             }
             else if (node.Name == "img") {
                 await AddImage(content, body, fB, doc);
@@ -59,10 +60,10 @@ namespace MetanitReader {
             }
         }
 
-        private static void AddTitle(HtmlNode node, XmlElement body, XmlDocument doc) {
+        private static void AddTitle(HtmlNode node, XmlElement body, XmlDocument doc, string level) {
             XmlElement title = doc.CreateElement("title");
             XmlElement p = doc.CreateElement("p");
-            p.InnerText = node.InnerText;
+            p.InnerXml = node.InnerText.Replace("&", "&amp;");
             title.AppendChild(p);
             body.AppendChild(title);
         }
@@ -72,17 +73,15 @@ namespace MetanitReader {
             foreach (var childNode in node.ChildNodes) {
                 try {
                     if (childNode.Name == "a") {
-                        p.InnerText += childNode.InnerText.Replace("&", "&amp;");
+                        p.InnerXml += childNode.InnerText.Replace("&", "&amp;");
                     }
-                    else if (childNode.Name == "b" || (childNode.Name == "span" && childNode.Attributes["class"]?.Value == "b")) {
+                    else if (childNode.Name == "class=\"b\"" || (childNode.Name == "span" && childNode.Attributes["class"]?.Value == "b")) {
                         var strongElement = doc.CreateElement("strong");
-                        strongElement.InnerText = childNode.InnerText.Replace("&", "&amp;");
+                        strongElement.InnerXml = childNode.InnerText.Replace("&", "&amp;");
                         p.AppendChild(strongElement);
                     }
-                    else if (childNode.Name == "sup") {
-                        var supElement = doc.CreateElement("sup");
-                        supElement.InnerText = childNode.InnerText.Replace("&", "&amp;");
-                        p.AppendChild(supElement);
+                    else if (childNode.Name == "br") {
+                        continue;
                     }
                     else {
                         p.InnerXml += childNode.OuterHtml.Replace("&", "&amp;");
@@ -90,7 +89,8 @@ namespace MetanitReader {
                 }
                 catch (Exception ex) {
                     Console.WriteLine($"Error occurred while processing node: {ex.Message}");
-                    Console.WriteLine($"Node content: {childNode.OuterHtml}");
+                    Console.WriteLine($"Node name: {childNode.Name}");
+                    Console.WriteLine($"Node content: {childNode.OuterHtml}\n");
                 }
             }
             body.AppendChild(p);
@@ -100,7 +100,7 @@ namespace MetanitReader {
             XmlElement list = doc.CreateElement("ul");
             foreach (var liNode in node.SelectNodes("li")) {
                 XmlElement li = doc.CreateElement("li");
-                li.InnerText = System.Security.SecurityElement.Escape(liNode.InnerText);
+                li.InnerXml = liNode.InnerText.Replace("&", "&amp;");
                 list.AppendChild(li);
             }
             body.AppendChild(list);
@@ -108,14 +108,36 @@ namespace MetanitReader {
 
         private static readonly string[] separators = ["\r\n", "\r", "\n"];
 
-        private static void AddCode(HtmlNode node, XmlElement body, XmlDocument doc) {
+        [GeneratedRegex(@"(?:<[^ \/>][^>]*>[^<]*<\/[a-zA-Z]+>)|(?<B>[<>])")]
+        private static partial Regex gtLtRegex();
+
+        [GeneratedRegex(@"&(?!([a-zA-Z]+;))")]
+        private static partial Regex exclXmlCodesRegex();
+
+        private static void AddCode(Content content, HtmlNode node, XmlElement body, XmlDocument doc) {
             var lines = node.InnerHtml.Split(separators, StringSplitOptions.None);
             foreach (var line in lines) {
                 XmlElement p = doc.CreateElement("p");
                 XmlElement code = doc.CreateElement("code");
-                if (!string.IsNullOrWhiteSpace(line)) {
-                    code.InnerText = line.Replace(" ", "\u00A0").Replace("\t", "\u00A0\u00A0\u00A0\u00A0");
+                XmlElement codeblock = doc.CreateElement("codeblock");
+                string input = exclXmlCodesRegex().Replace(line, "&amp;");
+                string processedLine = gtLtRegex().Replace(input, match => {
+                    if (match.Groups["B"].Success) {
+                        return match.Groups["B"].Value == ">" ? "&gt;" : "&lt;";
+                    }
+                    return match.Value;
+                });
+                try {
+                    codeblock.InnerXml = processedLine;
                 }
+                catch (XmlException ex) {
+                    Console.WriteLine($"Error adding code {ex.Message}");
+                    Console.WriteLine($"Code: {line}");
+                    Console.WriteLine($"Processed Code: {processedLine}");
+                    Console.WriteLine($"Node content: {content.Node?.OuterHtml}\n");
+                    codeblock.InnerText = "<!-- Error: Failed to add code block -->";
+                }
+                code.AppendChild(codeblock);
                 p.AppendChild(code);
                 body.AppendChild(p);
             }
@@ -144,7 +166,7 @@ namespace MetanitReader {
                 body.AppendChild(img);
             }
             catch (Exception ex) {
-                Console.WriteLine($"Error downloading image from {imageUrl}: {ex.Message}");
+                Console.WriteLine($"Error downloading image from {imageUrl}: {ex.Message}\n");
             }
         }
     }
