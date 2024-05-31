@@ -1,7 +1,9 @@
-using System.Text;
+using System.Diagnostics;
+using System.Net;
 using System.Text.RegularExpressions;
 using System.Xml;
 using HtmlAgilityPack;
+using PuppeteerSharp;
 
 namespace MetanitReader {
     partial class Fb2Generator {
@@ -27,9 +29,15 @@ namespace MetanitReader {
             author.AppendChild(firstName);
             XmlElement body = doc.CreateElement("body");
             fB.AppendChild(body);
+            var stopwatch = Stopwatch.StartNew();
+            var browser = await Puppeteer.LaunchAsync(new LaunchOptions { Headless = true });
+            var page = await browser.NewPageAsync();
             foreach (var c in contentList) {
                 await ParseHtmlNode(c, body, fB, doc);
             }
+            await browser.CloseAsync();
+            stopwatch.Stop();
+            Console.WriteLine($"Elapsed time: {stopwatch.ElapsedMilliseconds} milliseconds");
             return doc;
         }
 
@@ -49,6 +57,7 @@ namespace MetanitReader {
             }
             else if (node.Name == "pre") {
                 AddCode(content, node, body, doc);
+                //await AddCodeImageAsync(node, body, fB, doc, page);
             }
             else if (node.Name == "img") {
                 await AddImage(content, body, fB, doc);
@@ -143,7 +152,39 @@ namespace MetanitReader {
             }
         }
 
-        private static async Task AddImage(Content content, XmlElement body, XmlElement fB, XmlDocument doc) {
+        private static async Task AddCodeImageAsync(HtmlNode node, XmlElement body, XmlElement fB, XmlDocument doc, IPage page) {
+            var decodedHtml = WebUtility.HtmlDecode(node.InnerHtml);
+            var lines = decodedHtml.Split(separators, StringSplitOptions.None);
+            const int chunkSize = 20;
+            for (int i = 0; i < lines.Length; i += chunkSize) {
+                int endIndex = Math.Min(i + chunkSize, lines.Length);
+                string code = string.Join(Environment.NewLine, lines, i, endIndex - i);
+                string carbonUrl = $"https://carbon.now.sh/?bg=rgba%28171%2C+184%2C+195%2C+1%29&t=seti&wt=none&l=auto&width=800&ds=false&dsyoff=20px&dsblur=68px&wc=false&wa=false&pv=56px&ph=56px&ln=false&fl=1&fm=Hack&fs=10.5px&lh=105%25&si=false&es=2x&wm=false&code={Uri.EscapeDataString(code)}";
+                await page.GoToAsync(carbonUrl);
+                var codeElement = await page.WaitForSelectorAsync(".CodeMirror-code");
+                var boundingBox = await codeElement.BoundingBoxAsync();
+                var screenshotOptions = new ScreenshotOptions {
+                    Clip = new PuppeteerSharp.Media.Clip {
+                        X = (int)boundingBox.X,
+                        Y = (int)boundingBox.Y,
+                        Width = (int)boundingBox.Width,
+                        Height = (int)boundingBox.Height
+                    },
+                    OptimizeForSpeed = true
+                };
+                string binaryId = $"img_{Guid.NewGuid()}";
+                XmlElement binary = doc.CreateElement("binary");
+                binary.SetAttribute("id", binaryId);
+                binary.SetAttribute("content-type", "image/png");
+                binary.InnerText = await page.ScreenshotBase64Async(screenshotOptions);
+                fB.AppendChild(binary);
+                XmlElement img = doc.CreateElement("image");
+                img.SetAttribute("href", $"#{binaryId}");
+                body.AppendChild(img);
+            }
+        }
+
+        private static async Task AddImageAsync(Content content, XmlElement body, XmlElement fB, XmlDocument doc) {
             if (content.Node == null) {
                 return;
             }
