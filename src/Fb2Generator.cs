@@ -28,12 +28,12 @@ namespace MetanitReader {
             XmlElement body = doc.CreateElement("body");
             fB.AppendChild(body);
             foreach (var c in contentList) {
-                await ParseHtmlNode(c, body, fB, doc);
+                await ParseHtmlNodeAsync(c, body, fB, doc);
             }
             return doc;
         }
 
-        private static async Task ParseHtmlNode(Content content, XmlElement body, XmlElement fB, XmlDocument doc) {
+        private static async Task ParseHtmlNodeAsync(Content content, XmlElement body, XmlElement fB, XmlDocument doc, IPage page) {
             if (content.Node == null) {
                 return;
             }
@@ -51,21 +51,33 @@ namespace MetanitReader {
                 AddCode(content, node, body, doc);
             }
             else if (node.Name == "img") {
-                await AddImage(content, body, fB, doc);
+                await AddImageAsync(content, body, fB, doc);
             }
             else {
                 foreach (var childNode in node.ChildNodes) {
-                    await ParseHtmlNode(new Content(content.Url, childNode), body, fB, doc);
+                    await ParseHtmlNodeAsync(new Content(content.Url, childNode), body, fB, doc, page);
                 }
             }
         }
 
         private static void AddTitle(HtmlNode node, XmlElement body, XmlDocument doc, string level) {
-            XmlElement title = doc.CreateElement("title");
+            XmlElement element;
             XmlElement p = doc.CreateElement("p");
+            if (level == "h1") {
+                element = doc.CreateElement("title");
+            }
+            else {
+                element = doc.CreateElement("subtitle");
+                XmlElement strong = doc.CreateElement("strong");
+                strong.InnerXml = node.InnerText.Replace("&", "&amp;");
+                p.AppendChild(strong);
+                element.AppendChild(p);
+                body.AppendChild(element);
+                return;
+            }
             p.InnerXml = node.InnerText.Replace("&", "&amp;");
-            title.AppendChild(p);
-            body.AppendChild(title);
+            element.AppendChild(p);
+            body.AppendChild(element);
         }
 
         private static void AddParagraph(HtmlNode node, XmlElement body, XmlDocument doc) {
@@ -88,7 +100,7 @@ namespace MetanitReader {
                     }
                 }
                 catch (Exception ex) {
-                    Console.WriteLine($"Error occurred while processing node: {ex.Message}");
+                    Console.WriteLine($"Paragraph adding ERROR: {ex.Message}");
                     Console.WriteLine($"Node name: {childNode.Name}");
                     Console.WriteLine($"Node content: {childNode.OuterHtml}\n");
                 }
@@ -131,7 +143,7 @@ namespace MetanitReader {
                     codeblock.InnerXml = processedLine;
                 }
                 catch (XmlException ex) {
-                    Console.WriteLine($"Error adding code {ex.Message}");
+                    Console.WriteLine($"Code adding ERROR {ex.Message}");
                     Console.WriteLine($"Code: {line}");
                     Console.WriteLine($"Processed Code: {processedLine}");
                     Console.WriteLine($"Node content: {content.Node?.OuterHtml}\n");
