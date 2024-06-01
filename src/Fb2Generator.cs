@@ -9,7 +9,10 @@ namespace MetanitReader {
             XmlDocument doc = new();
             XmlDeclaration xmlDeclaration = doc.CreateXmlDeclaration("1.0", "utf-8", null);
             doc.AppendChild(xmlDeclaration);
-            XmlElement fB = doc.CreateElement("FictionBook");
+            XmlElement fB = doc.CreateElement("FictionBook", "http://www.gribuser.ru/xml/fictionbook/2.0");
+            XmlAttribute xlinkNamespace = doc.CreateAttribute("xmlns:l");
+            xlinkNamespace.Value = "http://www.w3.org/1999/xlink";
+            fB.Attributes.Append(xlinkNamespace);
             doc.AppendChild(fB);
             XmlElement description = doc.CreateElement("description");
             fB.AppendChild(description);
@@ -174,7 +177,9 @@ namespace MetanitReader {
                 binary.InnerText = Convert.ToBase64String(imageData);
                 fB.AppendChild(binary);
                 XmlElement img = doc.CreateElement("image");
-                img.SetAttribute("href", $"#{binaryId}");
+                XmlAttribute hrefAttr = doc.CreateAttribute("l", "href", "http://www.w3.org/1999/xlink");
+                hrefAttr.Value = $"#{binaryId}";
+                img.Attributes.Append(hrefAttr);
                 body.AppendChild(img);
             }
             catch (Exception ex) {
