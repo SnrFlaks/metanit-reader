@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Net;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml;
 using HtmlAgilityPack;
@@ -33,7 +34,7 @@ namespace MetanitReader {
             var browser = await Puppeteer.LaunchAsync(new LaunchOptions { Headless = true });
             var page = await browser.NewPageAsync();
             foreach (var c in contentList) {
-                await ParseHtmlNodeAsync(c, body, fB, doc);
+                await ParseHtmlNodeAsync(c, body, fB, doc, page);
             }
             await browser.CloseAsync();
             stopwatch.Stop();
@@ -56,8 +57,12 @@ namespace MetanitReader {
                 AddList(node, body, doc);
             }
             else if (node.Name == "pre") {
-                AddCode(content, node, body, doc);
-                //await AddCodeImageAsync(node, body, fB, doc, page);
+                if (node.HasClass("browser")) {
+                    AddCode(content, node, body, doc);
+                }
+                else {
+                    await AddCodeImageAsync(node, body, fB, doc, page);
+                }
             }
             else if (node.Name == "img") {
                 await AddImageAsync(content, body, fB, doc);
@@ -165,22 +170,30 @@ namespace MetanitReader {
         }
 
         private static async Task AddCodeImageAsync(HtmlNode node, XmlElement body, XmlElement fB, XmlDocument doc, IPage page) {
-            var decodedHtml = WebUtility.HtmlDecode(node.InnerHtml);
-            var lines = decodedHtml.Split(separators, StringSplitOptions.None);
-            const int chunkSize = 20;
-            for (int i = 0; i < lines.Length; i += chunkSize) {
-                int endIndex = Math.Min(i + chunkSize, lines.Length);
-                string code = string.Join(Environment.NewLine, lines, i, endIndex - i);
-                string carbonUrl = $"https://carbon.now.sh/?bg=rgba%28171%2C+184%2C+195%2C+1%29&t=seti&wt=none&l=auto&width=800&ds=false&dsyoff=20px&dsblur=68px&wc=false&wa=false&pv=56px&ph=56px&ln=false&fl=1&fm=Hack&fs=10.5px&lh=105%25&si=false&es=2x&wm=false&code={Uri.EscapeDataString(code)}";
-                await page.GoToAsync(carbonUrl);
-                var codeElement = await page.WaitForSelectorAsync(".CodeMirror-code");
-                var boundingBox = await codeElement.BoundingBoxAsync();
-                var screenshotOptions = new ScreenshotOptions {
-                    Clip = new PuppeteerSharp.Media.Clip {
-                        X = (int)boundingBox.X,
-                        Y = (int)boundingBox.Y,
-                        Width = (int)boundingBox.Width,
-                        Height = (int)boundingBox.Height
+            string decodedHtml = WebUtility.HtmlDecode(node.InnerHtml);
+            string carbonUrl = $"https://carbon.now.sh/?bg=rgba%28171%2C+184%2C+195%2C+1%29&t=seti&wt=none&l=auto&width=800&ds=false&dsyoff=20px&dsblur=68px&wc=false&wa=false&pv=56px&ph=56px&ln=false&fl=1&fm=Hack&fs=10px&lh=105%25&si=false&es=2x&wm=false&code={Uri.EscapeDataString(decodedHtml)}";
+            await page.GoToAsync(carbonUrl);
+            IElementHandle codeElement = await page.WaitForSelectorAsync(".CodeMirror-code");
+            BoundingBox boundingBox = await codeElement.BoundingBoxAsync();
+            const int chunkSize = 10;
+            const decimal lineHeight = 10.5m;
+            int totalLines = decodedHtml.Count(c => c == '\n');
+            for (int i = 0; i < totalLines; i += chunkSize) {
+                int lineCount = Math.Min(chunkSize, totalLines - i);
+                int yOffset = (int)(boundingBox.Y + (i * lineHeight));
+                decimal height;
+                if (i + chunkSize > totalLines) {
+                    height = lineHeight * (lineCount - totalLines) + boundingBox.Height;
+                }
+                else {
+                    height = lineCount * lineHeight;
+                }
+                ScreenshotOptions ssOp = new() {
+                    Clip = new() {
+                        X = boundingBox.X,
+                        Y = yOffset,
+                        Width = boundingBox.Width,
+                        Height = height
                     },
                     OptimizeForSpeed = true
                 };
@@ -188,10 +201,12 @@ namespace MetanitReader {
                 XmlElement binary = doc.CreateElement("binary");
                 binary.SetAttribute("id", binaryId);
                 binary.SetAttribute("content-type", "image/png");
-                binary.InnerText = await page.ScreenshotBase64Async(screenshotOptions);
+                binary.InnerText = await page.ScreenshotBase64Async(ssOp);
                 fB.AppendChild(binary);
                 XmlElement img = doc.CreateElement("image");
-                img.SetAttribute("href", $"#{binaryId}");
+                XmlAttribute hrefAttr = doc.CreateAttribute("l", "href", "http://www.w3.org/1999/xlink");
+                hrefAttr.Value = $"#{binaryId}";
+                img.Attributes.Append(hrefAttr);
                 body.AppendChild(img);
             }
         }
@@ -215,7 +230,9 @@ namespace MetanitReader {
                 binary.InnerText = Convert.ToBase64String(imageData);
                 fB.AppendChild(binary);
                 XmlElement img = doc.CreateElement("image");
-                img.SetAttribute("href", $"#{binaryId}");
+                XmlAttribute hrefAttr = doc.CreateAttribute("l", "href", "http://www.w3.org/1999/xlink");
+                hrefAttr.Value = $"#{binaryId}";
+                img.Attributes.Append(hrefAttr);
                 body.AppendChild(img);
             }
             catch (Exception ex) {
