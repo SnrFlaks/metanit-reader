@@ -1,10 +1,11 @@
 using System.Diagnostics;
 using System.Net;
-using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml;
 using HtmlAgilityPack;
 using PuppeteerSharp;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
 
 namespace MetanitReader {
     partial class Fb2Generator {
@@ -41,7 +42,7 @@ namespace MetanitReader {
             }
             await browser.CloseAsync();
             stopwatch.Stop();
-            Console.WriteLine($"Elapsed time: {stopwatch.ElapsedMilliseconds} milliseconds");
+            Console.WriteLine($"Full time: {stopwatch.ElapsedMilliseconds} ms");
             return doc;
         }
 
@@ -60,7 +61,7 @@ namespace MetanitReader {
                 AddList(node, body, doc);
             }
             else if (node.Name == "pre") {
-                if (node.HasClass("browser")) {
+                if (node.HasClass("browser") || node.InnerHtml.Count(c => c == '\n') < 20) {
                     AddCode(content, node, body, doc);
                 }
                 else {
@@ -157,7 +158,7 @@ namespace MetanitReader {
                     return match.Value;
                 });
                 try {
-                    codeblock.InnerXml = processedLine;
+                    codeblock.InnerXml = processedLine.Replace("\t", "\u00A0\u00A0\u00A0\u00A0");
                 }
                 catch (XmlException ex) {
                     Console.WriteLine($"Code adding ERROR {ex.Message}");
@@ -174,42 +175,43 @@ namespace MetanitReader {
 
         private static async Task AddCodeImageAsync(HtmlNode node, XmlElement body, XmlElement fB, XmlDocument doc, IPage page) {
             string decodedHtml = WebUtility.HtmlDecode(node.InnerHtml);
-            string carbonUrl = $"https://carbon.now.sh/?bg=rgba%28171%2C+184%2C+195%2C+1%29&t=seti&wt=none&l=auto&width=800&ds=false&dsyoff=20px&dsblur=68px&wc=false&wa=false&pv=56px&ph=56px&ln=false&fl=1&fm=Hack&fs=10px&lh=105%25&si=false&es=2x&wm=false&code={Uri.EscapeDataString(decodedHtml)}";
+            string carbonUrl = $"https://carbon.now.sh/?bg=rgba%28171%2C+184%2C+195%2C+1%29&t=seti&wt=none&l=auto&width=800&ds=false&dsyoff=20px&dsblur=68px&wc=false&wa=false&pv=56px&ph=56px&ln=false&fl=1&fm=Hack&fs=10px&lh=110%25&si=false&es=2x&wm=false&code={Uri.EscapeDataString(decodedHtml)}";
             await page.GoToAsync(carbonUrl);
             IElementHandle codeElement = await page.WaitForSelectorAsync(".CodeMirror-code");
             BoundingBox boundingBox = await codeElement.BoundingBoxAsync();
-            const int chunkSize = 10;
-            const decimal lineHeight = 10.5m;
-            int totalLines = decodedHtml.Count(c => c == '\n');
+            const int chunkSize = 20;
+            const int lineHeight = 11;
+            int boxWidth = (int)boundingBox.Width;
+            int boxHeight = (int)boundingBox.Height;
+            ScreenshotOptions ssOp = new() {
+                Clip = new() {
+                    X = boundingBox.X,
+                    Y = boundingBox.Y,
+                    Width = boxWidth,
+                    Height = boxHeight
+                },
+                OptimizeForSpeed = true
+            };
+            byte[] imageData = await page.ScreenshotDataAsync(ssOp);
+            using Image<Rgba32> image = Image.Load<Rgba32>(imageData);
+            using MemoryStream ms = new();
+            int totalLines = decodedHtml.Count(c => c == '\n') + 1;
             for (int i = 0; i < totalLines; i += chunkSize) {
-                int lineCount = Math.Min(chunkSize, totalLines - i);
-                int yOffset = (int)(boundingBox.Y + (i * lineHeight));
-                decimal height;
-                if (i + chunkSize > totalLines) {
-                    height = lineHeight * (lineCount - totalLines) + boundingBox.Height;
-                }
-                else {
-                    height = lineCount * lineHeight;
-                }
-                ScreenshotOptions ssOp = new() {
-                    Clip = new() {
-                        X = boundingBox.X,
-                        Y = yOffset,
-                        Width = boundingBox.Width,
-                        Height = height
-                    },
-                    OptimizeForSpeed = true
-                };
-                string binaryId = $"img_{Guid.NewGuid()}";
-                XmlElement binary = doc.CreateElement("binary");
-                binary.SetAttribute("id", binaryId);
-                binary.SetAttribute("content-type", "image/png");
-                binary.InnerText = await page.ScreenshotBase64Async(ssOp);
-                fB.AppendChild(binary);
-                XmlElement img = doc.CreateElement("image");
-                XmlAttribute hrefAttr = doc.CreateAttribute("l", "href", "http://www.w3.org/1999/xlink");
-                hrefAttr.Value = $"#{binaryId}";
-                img.Attributes.Append(hrefAttr);
+                int height = i + chunkSize > totalLines ? lineHeight * -i + boxHeight : chunkSize * lineHeight;
+                Image<Rgba32> targetImage = new(boxWidth, height);
+                image.ProcessPixelRows(targetImage, (sourceAccessor, targetAccessor) => {
+                    for (int j = 0; j < height; j++) {
+                        Span<Rgba32> sourceRow = sourceAccessor.GetRowSpan(i * lineHeight + j);
+                        Span<Rgba32> targetRow = targetAccessor.GetRowSpan(j);
+                        sourceRow[..boxWidth].CopyTo(targetRow);
+                    }
+                });
+                ms.SetLength(0);
+                targetImage.SaveAsJpeg(ms, new() {
+                    Quality = 90
+                });
+                byte[] imageBytes = ms.ToArray();
+                XmlElement img = GetXmlImage(imageBytes, fB, doc);
                 body.AppendChild(img);
             }
         }
@@ -219,28 +221,32 @@ namespace MetanitReader {
                 return;
             }
             HtmlNode node = content.Node;
-            string src = node.GetAttributeValue("src", string.Empty);
-            Uri baseUri = new(content.Url);
-            Uri relativeUri = new(baseUri, src);
+            string src = node.GetAttributeValue("src", "");
+            Uri relativeUri = new(new(content.Url), src);
             string imageUrl = relativeUri.AbsoluteUri;
             try {
                 HttpClient httpClient = HttpManager.Instance.GetHttpClient();
-                byte[] imageData = await httpClient.GetByteArrayAsync(imageUrl).ConfigureAwait(false);
-                string binaryId = $"img_{Guid.NewGuid()}";
-                XmlElement binary = doc.CreateElement("binary");
-                binary.SetAttribute("id", binaryId);
-                binary.SetAttribute("content-type", "image/jpeg");
-                binary.InnerText = Convert.ToBase64String(imageData);
-                fB.AppendChild(binary);
-                XmlElement img = doc.CreateElement("image");
-                XmlAttribute hrefAttr = doc.CreateAttribute("l", "href", "http://www.w3.org/1999/xlink");
-                hrefAttr.Value = $"#{binaryId}";
-                img.Attributes.Append(hrefAttr);
+                byte[] imageData = await httpClient.GetByteArrayAsync(imageUrl);
+                XmlElement img = GetXmlImage(imageData, fB, doc);
                 body.AppendChild(img);
             }
             catch (Exception ex) {
                 Console.WriteLine($"Error downloading image from {imageUrl}: {ex.Message}\n");
             }
+        }
+
+        private static XmlElement GetXmlImage(byte[] imageData, XmlElement fB, XmlDocument doc) {
+            string binaryId = $"img_{Guid.NewGuid()}";
+            XmlElement binary = doc.CreateElement("binary");
+            binary.SetAttribute("id", binaryId);
+            binary.SetAttribute("content-type", "image/jpeg");
+            binary.InnerText = Convert.ToBase64String(imageData);
+            fB.AppendChild(binary);
+            XmlElement img = doc.CreateElement("image");
+            XmlAttribute hrefAttr = doc.CreateAttribute("l", "href", "http://www.w3.org/1999/xlink");
+            hrefAttr.Value = $"#{binaryId}";
+            img.Attributes.Append(hrefAttr);
+            return img;
         }
     }
 }
