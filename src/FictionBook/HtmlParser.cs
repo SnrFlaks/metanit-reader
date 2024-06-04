@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Net;
 using System.Text.RegularExpressions;
 using System.Xml;
@@ -7,46 +6,9 @@ using PuppeteerSharp;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 
-namespace MetanitReader {
-    partial class Fb2Generator {
-        public static async Task<XmlDocument> GenerateFb2(Content content, List<Content> contentList) {
-            XmlDocument doc = new();
-            XmlDeclaration xmlDeclaration = doc.CreateXmlDeclaration("1.0", "utf-8", null);
-            doc.AppendChild(xmlDeclaration);
-            XmlElement fB = doc.CreateElement("FictionBook", "http://www.gribuser.ru/xml/fictionbook/2.0");
-            XmlAttribute xlinkNamespace = doc.CreateAttribute("xmlns:l");
-            xlinkNamespace.Value = "http://www.w3.org/1999/xlink";
-            fB.Attributes.Append(xlinkNamespace);
-            doc.AppendChild(fB);
-            XmlElement description = doc.CreateElement("description");
-            fB.AppendChild(description);
-            XmlElement titleInfo = doc.CreateElement("title-info");
-            description.AppendChild(titleInfo);
-            if (content.Name != null) {
-                XmlElement bookTitle = doc.CreateElement("book-title");
-                bookTitle.InnerXml = content.Name;
-                titleInfo.AppendChild(bookTitle);
-            }
-            XmlElement author = doc.CreateElement("author");
-            titleInfo.AppendChild(author);
-            XmlElement firstName = doc.CreateElement("first-name");
-            firstName.InnerXml = "METANIT";
-            author.AppendChild(firstName);
-            XmlElement body = doc.CreateElement("body");
-            fB.AppendChild(body);
-            var stopwatch = Stopwatch.StartNew();
-            var browser = await Puppeteer.LaunchAsync(new LaunchOptions { Headless = true });
-            var page = await browser.NewPageAsync();
-            foreach (var c in contentList) {
-                await ParseHtmlNodeAsync(c, body, fB, doc, page);
-            }
-            await browser.CloseAsync();
-            stopwatch.Stop();
-            Console.WriteLine($"Full time: {stopwatch.ElapsedMilliseconds} ms");
-            return doc;
-        }
-
-        private static async Task ParseHtmlNodeAsync(Content content, XmlElement body, XmlElement fB, XmlDocument doc, IPage page) {
+namespace MetanitReader.FictionBook {
+    public partial class HtmlParser {
+        public static async Task ParseHtmlNodeAsync(Content content, XmlElement body, XmlElement fB, XmlDocument doc, IPage page) {
             if (content.Node == null) {
                 return;
             }

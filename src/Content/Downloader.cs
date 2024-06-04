@@ -81,7 +81,7 @@ namespace MetanitReader {
         }
 
         private static async Task DownloadFb2(Content content, List<Content> contentList, string booksDirPath) {
-            XmlDocument doc = await Fb2Generator.GenerateFb2(content, contentList);
+            XmlDocument doc = await FictionBook.Generator.GenerateDocument(content, contentList);
             string filePath = Path.Combine(booksDirPath, $"{content.Name}.fb2");
             doc.Save(filePath);
         }
