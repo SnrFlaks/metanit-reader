@@ -4,7 +4,7 @@ using PuppeteerSharp;
 
 namespace MetanitReader.FictionBook {
     public class Generator {
-        public static async Task<XmlDocument> GenerateDocument(Content content, List<Content> contentList) {
+        public static async Task<XmlDocument> GenerateDocumentAsync(Content content, List<Content> contentList) {
             XmlDocument doc = new();
             XmlDeclaration xmlDeclaration = doc.CreateXmlDeclaration("1.0", "utf-8", null);
             doc.AppendChild(xmlDeclaration);
@@ -17,11 +17,9 @@ namespace MetanitReader.FictionBook {
             fB.AppendChild(description);
             XmlElement titleInfo = doc.CreateElement("title-info");
             description.AppendChild(titleInfo);
-            if (content.Name != null) {
-                XmlElement bookTitle = doc.CreateElement("book-title");
-                bookTitle.InnerXml = content.Name;
-                titleInfo.AppendChild(bookTitle);
-            }
+            XmlElement bookTitle = doc.CreateElement("book-title");
+            bookTitle.InnerXml = content.Name!;
+            titleInfo.AppendChild(bookTitle);
             XmlElement author = doc.CreateElement("author");
             titleInfo.AppendChild(author);
             XmlElement firstName = doc.CreateElement("first-name");

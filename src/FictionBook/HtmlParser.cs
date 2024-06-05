@@ -9,29 +9,34 @@ using SixLabors.ImageSharp.PixelFormats;
 namespace MetanitReader.FictionBook {
     public partial class HtmlParser {
         public static async Task ParseHtmlNodeAsync(Content content, XmlElement body, XmlElement fB, XmlDocument doc, IPage page) {
-            if (content.Node == null) {
-                return;
-            }
-            HtmlNode node = content.Node;
+            HtmlNode node = content.Node!;
             if (node.Name == "h1" || node.Name == "h2" || node.Name == "h3") {
-                AddTitle(node, body, doc, node.Name);
+                XmlElement title = CreateTitleElement(node, doc, node.Name);
+                body.AppendChild(title);
             }
             else if (node.Name == "p") {
-                AddParagraph(node, body, doc);
+                XmlElement p = CreateParagraphElement(node, doc);
+                body.AppendChild(p);
             }
             else if (node.Name == "ul") {
-                AddList(node, body, doc);
+                XmlElement list = CreateListElement(node, doc);
+                body.AppendChild(list);
             }
             else if (node.Name == "pre") {
                 if (node.HasClass("browser") || node.InnerHtml.Count(c => c == '\n') < 20) {
-                    AddCode(content, node, body, doc);
+                    XmlElement code = CreateCodeElement(node, doc);
+                    body.AppendChild(code);
                 }
                 else {
-                    await AddCodeImageAsync(node, body, fB, doc, page);
+                    List<XmlElement> codeImages = await CreateCodeImageElementsAsync(node, fB, doc, page);
+                    foreach (var img in codeImages) {
+                        body.AppendChild(img);
+                    }
                 }
             }
             else if (node.Name == "img") {
-                await AddImageAsync(content, body, fB, doc);
+                XmlElement img = await CreateImageElementAsync(content, fB, doc)!;
+                body.AppendChild(img);
             }
             else {
                 foreach (var childNode in node.ChildNodes) {
@@ -40,7 +45,7 @@ namespace MetanitReader.FictionBook {
             }
         }
 
-        private static void AddTitle(HtmlNode node, XmlElement body, XmlDocument doc, string level) {
+        private static XmlElement CreateTitleElement(HtmlNode node, XmlDocument doc, string level) {
             XmlElement element;
             XmlElement p = doc.CreateElement("p");
             if (level == "h1") {
@@ -52,50 +57,42 @@ namespace MetanitReader.FictionBook {
                 strong.InnerXml = node.InnerText.Replace("&", "&amp;");
                 p.AppendChild(strong);
                 element.AppendChild(p);
-                body.AppendChild(element);
-                return;
+                return element;
             }
             p.InnerXml = node.InnerText.Replace("&", "&amp;");
             element.AppendChild(p);
-            body.AppendChild(element);
+            return element;
         }
 
-        private static void AddParagraph(HtmlNode node, XmlElement body, XmlDocument doc) {
-            var p = doc.CreateElement("p");
+        private static XmlElement CreateParagraphElement(HtmlNode node, XmlDocument doc) {
+            XmlElement p = doc.CreateElement("p");
             foreach (var childNode in node.ChildNodes) {
-                try {
-                    if (childNode.Name == "a") {
-                        p.InnerXml += childNode.InnerText.Replace("&", "&amp;");
-                    }
-                    else if (childNode.Name == "class=\"b\"" || (childNode.Name == "span" && childNode.Attributes["class"]?.Value == "b")) {
-                        var strongElement = doc.CreateElement("strong");
-                        strongElement.InnerXml = childNode.InnerText.Replace("&", "&amp;");
-                        p.AppendChild(strongElement);
-                    }
-                    else if (childNode.Name == "br") {
-                        continue;
-                    }
-                    else {
-                        p.InnerXml += childNode.OuterHtml.Replace("&", "&amp;");
-                    }
+                if (childNode.Name == "a") {
+                    p.InnerXml += childNode.InnerText.Replace("&", "&amp;");
                 }
-                catch (Exception ex) {
-                    Console.WriteLine($"Paragraph adding ERROR: {ex.Message}");
-                    Console.WriteLine($"Node name: {childNode.Name}");
-                    Console.WriteLine($"Node content: {childNode.OuterHtml}\n");
+                else if (childNode.Name == "class=\"b\"" || (childNode.Name == "span" && childNode.Attributes["class"]?.Value == "b")) {
+                    XmlElement strongElement = doc.CreateElement("strong");
+                    strongElement.InnerXml = childNode.InnerText.Replace("&", "&amp;");
+                    p.AppendChild(strongElement);
+                }
+                else if (childNode.Name == "br") {
+                    continue;
+                }
+                else {
+                    p.InnerXml += childNode.OuterHtml.Replace("&", "&amp;");
                 }
             }
-            body.AppendChild(p);
+            return p;
         }
 
-        private static void AddList(HtmlNode node, XmlElement body, XmlDocument doc) {
+        private static XmlElement CreateListElement(HtmlNode node, XmlDocument doc) {
             XmlElement list = doc.CreateElement("ul");
             foreach (var liNode in node.SelectNodes("li")) {
                 XmlElement li = doc.CreateElement("li");
                 li.InnerXml = liNode.InnerText.Replace("&", "&amp;");
                 list.AppendChild(li);
             }
-            body.AppendChild(list);
+            return list;
         }
 
         private static readonly string[] separators = ["\r\n", "\r", "\n"];
@@ -106,36 +103,32 @@ namespace MetanitReader.FictionBook {
         [GeneratedRegex(@"&(?!([a-zA-Z]+;))")]
         private static partial Regex exclXmlCodesRegex();
 
-        private static void AddCode(Content content, HtmlNode node, XmlElement body, XmlDocument doc) {
+        private static XmlElement CreateCodeElement(HtmlNode node, XmlDocument doc) {
+            XmlElement codeblock = doc.CreateElement("codeblock");
             var lines = node.InnerHtml.Split(separators, StringSplitOptions.None);
             foreach (var line in lines) {
                 XmlElement p = doc.CreateElement("p");
                 XmlElement code = doc.CreateElement("code");
-                XmlElement codeblock = doc.CreateElement("codeblock");
                 string input = exclXmlCodesRegex().Replace(line, "&amp;");
                 string processedLine = gtLtRegex().Replace(input, match => {
                     if (match.Groups["B"].Success) {
                         return match.Groups["B"].Value == ">" ? "&gt;" : "&lt;";
                     }
                     return match.Value;
-                });
-                try {
-                    codeblock.InnerXml = processedLine.Replace("\t", "\u00A0\u00A0\u00A0\u00A0");
+                }).Replace("\t", "\u00A0\u00A0\u00A0\u00A0");
+                if (string.IsNullOrWhiteSpace(processedLine)) {
+                    XmlElement el = doc.CreateElement("empty-line");
+                    codeblock.AppendChild(el);
+                    continue;
                 }
-                catch (XmlException ex) {
-                    Console.WriteLine($"Code adding ERROR {ex.Message}");
-                    Console.WriteLine($"Code: {line}");
-                    Console.WriteLine($"Processed Code: {processedLine}");
-                    Console.WriteLine($"Node content: {content.Node?.OuterHtml}\n");
-                    codeblock.InnerText = "<!-- Error: Failed to add code block -->";
-                }
-                code.AppendChild(codeblock);
+                code.InnerXml = processedLine;
                 p.AppendChild(code);
-                body.AppendChild(p);
+                codeblock.AppendChild(p);
             }
+            return codeblock;
         }
 
-        private static async Task AddCodeImageAsync(HtmlNode node, XmlElement body, XmlElement fB, XmlDocument doc, IPage page) {
+        private static async Task<List<XmlElement>> CreateCodeImageElementsAsync(HtmlNode node, XmlElement fB, XmlDocument doc, IPage page) {
             string decodedHtml = WebUtility.HtmlDecode(node.InnerHtml);
             string carbonUrl = $"https://carbon.now.sh/?bg=rgba%28171%2C+184%2C+195%2C+1%29&t=seti&wt=none&l=auto&width=800&ds=false&dsyoff=20px&dsblur=68px&wc=false&wa=false&pv=56px&ph=56px&ln=false&fl=1&fm=Hack&fs=10px&lh=110%25&si=false&es=2x&wm=false&code={Uri.EscapeDataString(decodedHtml)}";
             await page.GoToAsync(carbonUrl);
@@ -145,7 +138,8 @@ namespace MetanitReader.FictionBook {
             const int lineHeight = 11;
             int boxWidth = (int)boundingBox.Width;
             int boxHeight = (int)boundingBox.Height;
-            ScreenshotOptions ssOp = new() {
+            List<XmlElement> imageElements = [];
+            byte[] imageData = await page.ScreenshotDataAsync(new() {
                 Clip = new() {
                     X = boundingBox.X,
                     Y = boundingBox.Y,
@@ -153,8 +147,7 @@ namespace MetanitReader.FictionBook {
                     Height = boxHeight
                 },
                 OptimizeForSpeed = true
-            };
-            byte[] imageData = await page.ScreenshotDataAsync(ssOp);
+            });
             using Image<Rgba32> image = Image.Load<Rgba32>(imageData);
             using MemoryStream ms = new();
             int totalLines = decodedHtml.Count(c => c == '\n') + 1;
@@ -174,27 +167,20 @@ namespace MetanitReader.FictionBook {
                 });
                 byte[] imageBytes = ms.ToArray();
                 XmlElement img = GetXmlImage(imageBytes, fB, doc);
-                body.AppendChild(img);
+                imageElements.Add(img);
             }
+            return imageElements;
         }
 
-        private static async Task AddImageAsync(Content content, XmlElement body, XmlElement fB, XmlDocument doc) {
-            if (content.Node == null) {
-                return;
-            }
-            HtmlNode node = content.Node;
+        private static async Task<XmlElement> CreateImageElementAsync(Content content, XmlElement fB, XmlDocument doc) {
+            HtmlNode node = content.Node!;
             string src = node.GetAttributeValue("src", "");
             Uri relativeUri = new(new(content.Url), src);
             string imageUrl = relativeUri.AbsoluteUri;
-            try {
-                HttpClient httpClient = HttpManager.Instance.GetHttpClient();
-                byte[] imageData = await httpClient.GetByteArrayAsync(imageUrl);
-                XmlElement img = GetXmlImage(imageData, fB, doc);
-                body.AppendChild(img);
-            }
-            catch (Exception ex) {
-                Console.WriteLine($"Error downloading image from {imageUrl}: {ex.Message}\n");
-            }
+            HttpClient httpClient = HttpManager.Instance.GetHttpClient();
+            byte[] imageData = await httpClient.GetByteArrayAsync(imageUrl);
+            XmlElement img = GetXmlImage(imageData, fB, doc);
+            return img;
         }
 
         private static XmlElement GetXmlImage(byte[] imageData, XmlElement fB, XmlDocument doc) {
