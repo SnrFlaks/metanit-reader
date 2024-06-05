@@ -1,6 +1,8 @@
+using System.Diagnostics;
 using System.Xml;
 using HtmlAgilityPack;
-using MetanitReader.FictionBook;
+using MetanitReader.Fb2;
+using PuppeteerSharp;
 using Spectre.Console;
 
 namespace MetanitReader {
@@ -51,7 +53,7 @@ namespace MetanitReader {
             //         ctx.Spinner(Spinner.Known.Dots);
             //         ctx.SpinnerStyle(Style.Parse("green"));
             await (format switch {
-                "fb2" => DownloadFb2(content, contentList, booksDirPath),
+                "fb2" => DownloadFb2Async(content, contentList, booksDirPath),
                 "epub" => DownloadEpub(contentList, booksDirPath),
                 _ => throw new ArgumentException($"Unsupported format: {format}", nameof(format)),
             });
@@ -81,10 +83,19 @@ namespace MetanitReader {
             return booksDirPath;
         }
 
-        private static async Task DownloadFb2(Content content, List<Content> contentList, string booksDirPath) {
-            XmlDocument doc = await FictionBook.Generator.GenerateDocumentAsync(content, contentList);
+        private static async Task DownloadFb2Async(Content content, List<Content> contentList, string booksDirPath) {
+            FictionBook fB = FictionBook.Generate(content.Name!);
+            var stopwatch = Stopwatch.StartNew();
+            using (var browser = await Puppeteer.LaunchAsync(new LaunchOptions { Headless = true }))
+            using (var page = await browser.NewPageAsync()) {
+                foreach (var c in contentList) {
+                    await HtmlParser.ParseHtmlNodeAsync(c, fB, page);
+                }
+            }
+            stopwatch.Stop();
+            Console.WriteLine($"Full time: {stopwatch.ElapsedMilliseconds} ms");
             string filePath = Path.Combine(booksDirPath, $"{content.Name}.fb2");
-            doc.Save(filePath);
+            fB.Document.Save(filePath);
         }
 
         private static Task DownloadEpub(List<Content> contentList, string booksDirPath) {

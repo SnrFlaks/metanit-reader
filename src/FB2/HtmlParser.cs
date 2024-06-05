@@ -6,65 +6,67 @@ using PuppeteerSharp;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 
-namespace MetanitReader.FictionBook {
+namespace MetanitReader.Fb2 {
     public partial class HtmlParser {
-        public static async Task ParseHtmlNodeAsync(Content content, XmlElement body, XmlElement fB, XmlDocument doc, IPage page) {
+        public static async Task ParseHtmlNodeAsync(Content content, FictionBook fB, IPage page) {
             HtmlNode node = content.Node!;
+            XmlElement body = fB.Body;
             if (node.Name == "h1" || node.Name == "h2" || node.Name == "h3") {
-                XmlElement title = CreateTitleElement(node, doc, node.Name);
+                XmlElement title = CreateTitleElement(node, fB, node.Name);
                 body.AppendChild(title);
             }
             else if (node.Name == "p") {
-                XmlElement p = CreateParagraphElement(node, doc);
+                XmlElement p = CreateParagraphElement(node, fB);
                 body.AppendChild(p);
             }
             else if (node.Name == "ul") {
-                XmlElement list = CreateListElement(node, doc);
+                XmlElement list = CreateListElement(node, fB);
                 body.AppendChild(list);
             }
             else if (node.Name == "pre") {
                 if (node.HasClass("browser") || node.InnerHtml.Count(c => c == '\n') < 20) {
-                    XmlElement code = CreateCodeElement(node, doc);
+                    XmlElement code = CreateCodeElement(node, fB);
                     body.AppendChild(code);
                 }
                 else {
-                    List<XmlElement> codeImages = await CreateCodeImageElementsAsync(node, fB, doc, page);
-                    foreach (var img in codeImages) {
+                    foreach (var img in await CreateCodeImageElementsAsync(node, fB, page)) {
                         body.AppendChild(img);
                     }
                 }
             }
             else if (node.Name == "img") {
-                XmlElement img = await CreateImageElementAsync(content, fB, doc)!;
+                XmlElement img = await CreateImageElementAsync(content, fB);
                 body.AppendChild(img);
             }
             else {
                 foreach (var childNode in node.ChildNodes) {
-                    await ParseHtmlNodeAsync(new Content(content.Url, childNode), body, fB, doc, page);
+                    await ParseHtmlNodeAsync(new Content(content.Url, childNode), fB, page);
                 }
             }
         }
 
-        private static XmlElement CreateTitleElement(HtmlNode node, XmlDocument doc, string level) {
-            XmlElement element;
+        private static XmlElement CreateTitleElement(HtmlNode node, FictionBook fB, string level) {
+            XmlElement title;
+            XmlDocument doc = fB.Document;
             XmlElement p = doc.CreateElement("p");
             if (level == "h1") {
-                element = doc.CreateElement("title");
+                title = doc.CreateElement("title");
             }
             else {
-                element = doc.CreateElement("subtitle");
+                title = doc.CreateElement("subtitle");
                 XmlElement strong = doc.CreateElement("strong");
                 strong.InnerXml = node.InnerText.Replace("&", "&amp;");
                 p.AppendChild(strong);
-                element.AppendChild(p);
-                return element;
+                title.AppendChild(p);
+                return title;
             }
             p.InnerXml = node.InnerText.Replace("&", "&amp;");
-            element.AppendChild(p);
-            return element;
+            title.AppendChild(p);
+            return title;
         }
 
-        private static XmlElement CreateParagraphElement(HtmlNode node, XmlDocument doc) {
+        private static XmlElement CreateParagraphElement(HtmlNode node, FictionBook fB) {
+            XmlDocument doc = fB.Document;
             XmlElement p = doc.CreateElement("p");
             foreach (var childNode in node.ChildNodes) {
                 if (childNode.Name == "a") {
@@ -85,7 +87,8 @@ namespace MetanitReader.FictionBook {
             return p;
         }
 
-        private static XmlElement CreateListElement(HtmlNode node, XmlDocument doc) {
+        private static XmlElement CreateListElement(HtmlNode node, FictionBook fB) {
+            XmlDocument doc = fB.Document;
             XmlElement list = doc.CreateElement("ul");
             foreach (var liNode in node.SelectNodes("li")) {
                 XmlElement li = doc.CreateElement("li");
@@ -103,7 +106,8 @@ namespace MetanitReader.FictionBook {
         [GeneratedRegex(@"&(?!([a-zA-Z]+;))")]
         private static partial Regex exclXmlCodesRegex();
 
-        private static XmlElement CreateCodeElement(HtmlNode node, XmlDocument doc) {
+        private static XmlElement CreateCodeElement(HtmlNode node, FictionBook fB) {
+            XmlDocument doc = fB.Document;
             XmlElement codeblock = doc.CreateElement("codeblock");
             var lines = node.InnerHtml.Split(separators, StringSplitOptions.None);
             foreach (var line in lines) {
@@ -128,7 +132,8 @@ namespace MetanitReader.FictionBook {
             return codeblock;
         }
 
-        private static async Task<List<XmlElement>> CreateCodeImageElementsAsync(HtmlNode node, XmlElement fB, XmlDocument doc, IPage page) {
+        private static async Task<List<XmlElement>> CreateCodeImageElementsAsync(HtmlNode node, FictionBook fB, IPage page) {
+            XmlDocument doc = fB.Document;
             string decodedHtml = WebUtility.HtmlDecode(node.InnerHtml);
             string carbonUrl = $"https://carbon.now.sh/?bg=rgba%28171%2C+184%2C+195%2C+1%29&t=seti&wt=none&l=auto&width=800&ds=false&dsyoff=20px&dsblur=68px&wc=false&wa=false&pv=56px&ph=56px&ln=false&fl=1&fm=Hack&fs=10px&lh=110%25&si=false&es=2x&wm=false&code={Uri.EscapeDataString(decodedHtml)}";
             await page.GoToAsync(carbonUrl);
@@ -166,30 +171,31 @@ namespace MetanitReader.FictionBook {
                     Quality = 90
                 });
                 byte[] imageBytes = ms.ToArray();
-                XmlElement img = GetXmlImage(imageBytes, fB, doc);
+                XmlElement img = GetXmlImage(imageBytes, fB);
                 imageElements.Add(img);
             }
             return imageElements;
         }
 
-        private static async Task<XmlElement> CreateImageElementAsync(Content content, XmlElement fB, XmlDocument doc) {
+        private static async Task<XmlElement> CreateImageElementAsync(Content content, FictionBook fB) {
             HtmlNode node = content.Node!;
             string src = node.GetAttributeValue("src", "");
             Uri relativeUri = new(new(content.Url), src);
             string imageUrl = relativeUri.AbsoluteUri;
             HttpClient httpClient = HttpManager.Instance.GetHttpClient();
             byte[] imageData = await httpClient.GetByteArrayAsync(imageUrl);
-            XmlElement img = GetXmlImage(imageData, fB, doc);
+            XmlElement img = GetXmlImage(imageData, fB);
             return img;
         }
 
-        private static XmlElement GetXmlImage(byte[] imageData, XmlElement fB, XmlDocument doc) {
+        private static XmlElement GetXmlImage(byte[] imageData, FictionBook fB) {
+            XmlDocument doc = fB.Document;
             string binaryId = $"img_{Guid.NewGuid()}";
             XmlElement binary = doc.CreateElement("binary");
             binary.SetAttribute("id", binaryId);
             binary.SetAttribute("content-type", "image/jpeg");
             binary.InnerText = Convert.ToBase64String(imageData);
-            fB.AppendChild(binary);
+            fB.Fb.AppendChild(binary);
             XmlElement img = doc.CreateElement("image");
             XmlAttribute hrefAttr = doc.CreateAttribute("l", "href", "http://www.w3.org/1999/xlink");
             hrefAttr.Value = $"#{binaryId}";

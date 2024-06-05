@@ -1,10 +1,20 @@
-using System.Diagnostics;
 using System.Xml;
-using PuppeteerSharp;
 
-namespace MetanitReader.FictionBook {
-    public class Generator {
-        public static async Task<XmlDocument> GenerateDocumentAsync(Content content, List<Content> contentList) {
+namespace MetanitReader.Fb2 {
+    public class FictionBook {
+        public XmlDocument Document { get; }
+        public XmlElement Fb { get; }
+        public XmlElement Body { get; }
+
+        public FictionBook(XmlDocument doc, XmlElement fB, XmlElement body) {
+            Document = doc;
+            Fb = fB;
+            Body = body;
+            Document.AppendChild(Fb);
+            Fb.AppendChild(Body);
+        }
+
+        public static FictionBook Generate(string title) {
             XmlDocument doc = new();
             XmlDeclaration xmlDeclaration = doc.CreateXmlDeclaration("1.0", "utf-8", null);
             doc.AppendChild(xmlDeclaration);
@@ -18,7 +28,7 @@ namespace MetanitReader.FictionBook {
             XmlElement titleInfo = doc.CreateElement("title-info");
             description.AppendChild(titleInfo);
             XmlElement bookTitle = doc.CreateElement("book-title");
-            bookTitle.InnerXml = content.Name!;
+            bookTitle.InnerXml = title;
             titleInfo.AppendChild(bookTitle);
             XmlElement author = doc.CreateElement("author");
             titleInfo.AppendChild(author);
@@ -27,16 +37,7 @@ namespace MetanitReader.FictionBook {
             author.AppendChild(firstName);
             XmlElement body = doc.CreateElement("body");
             fB.AppendChild(body);
-            var stopwatch = Stopwatch.StartNew();
-            using (var browser = await Puppeteer.LaunchAsync(new LaunchOptions { Headless = true }))
-            using (var page = await browser.NewPageAsync()) {
-                foreach (var c in contentList) {
-                    await HtmlParser.ParseHtmlNodeAsync(c, body, fB, doc, page);
-                }
-            }
-            stopwatch.Stop();
-            Console.WriteLine($"Full time: {stopwatch.ElapsedMilliseconds} ms");
-            return doc;
+            return new FictionBook(doc, fB, body);
         }
     }
 }
